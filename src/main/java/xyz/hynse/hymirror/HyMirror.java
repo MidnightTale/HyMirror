@@ -1,6 +1,9 @@
 package xyz.hynse.hymirror;
 
 import org.bukkit.*;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -21,13 +24,21 @@ import java.util.*;
 public final class HyMirror extends JavaPlugin implements Listener {
 
     private static final String MIRROR_TAG = "MirrorOfReturn";
-    private final Map<Player, Long> cooldowns = new HashMap<>();
-    private final Map<Player, Long> combatCooldowns = new HashMap<>();
+    private final Map<UUID, Long> cooldowns = new HashMap<>();
+    private final Map<UUID, BossBar> bossBars = new HashMap<>();
+    private final Map<UUID, Long> combatCooldowns = new HashMap<>();
+
 
     @Override
     public void onEnable() {
         getServer().getPluginManager().registerEvents(this, this);
         registerCustomRecipe();
+    }
+
+    @Override
+    public void onDisable() {
+        bossBars.values().forEach(BossBar::removeAll);
+        bossBars.clear();
     }
 
     private void registerCustomRecipe() {
@@ -66,26 +77,21 @@ public final class HyMirror extends JavaPlugin implements Listener {
         ItemStack handItem = player.getInventory().getItemInMainHand();
 
         if (handItem != null && isCustomItem(handItem)) {
-            if (isInCombat(player)) {
+            UUID playerId = player.getUniqueId();
+
+            if (isInCombat(playerId)) {
                 player.sendMessage(ChatColor.RED + "You are in combat! Wait until you are out of combat.");
                 return;
             }
 
-            if (isOnCooldown(player)) {
+            if (isOnCooldown(playerId)) {
                 player.sendMessage(ChatColor.RED + "The Mirror of Return is on cooldown!");
                 return;
             }
 
-            Location spawnLocation = player.getBedSpawnLocation();
-            if (spawnLocation == null) {
-                spawnLocation = player.getWorld().getSpawnLocation();
-            }
-            player.teleportAsync(spawnLocation);
-
-            playWarpEffects(player);
-
-            applyCooldown(player);
-
+            Location spawnLocation = Objects.requireNonNullElse(player.getBedSpawnLocation(), player.getWorld().getSpawnLocation());
+            BossBar bossBar = createBossBar(playerId);
+            warpPlayer(player, spawnLocation, bossBar);
             deductEchoShard(player);
 
             int usageCount = getUsageCount(handItem.getItemMeta());
@@ -100,33 +106,51 @@ public final class HyMirror extends JavaPlugin implements Listener {
     public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
         if (event.getEntity() instanceof Player) {
             Player player = (Player) event.getEntity();
+            UUID playerId = player.getUniqueId();
             if (isCustomItem(player.getInventory().getItemInMainHand())) {
-                combatCooldowns.remove(player);
+                combatCooldowns.put(playerId, System.currentTimeMillis() + 10000);
             }
         }
     }
 
-    private boolean isInCombat(Player player) {
-        return combatCooldowns.getOrDefault(player, 0L) > System.currentTimeMillis();
+
+    private boolean isInCombat(UUID playerId) {
+        return combatCooldowns.getOrDefault(playerId, 0L) > System.currentTimeMillis();
     }
 
-    private boolean isOnCooldown(Player player) {
-        return cooldowns.getOrDefault(player, 0L) > System.currentTimeMillis();
+    private boolean isOnCooldown(UUID playerId) {
+        return cooldowns.getOrDefault(playerId, 0L) > System.currentTimeMillis();
+    }
+
+    private BossBar createBossBar(UUID playerId) {
+        BossBar bossBar = Bukkit.createBossBar("Cooldown", BarColor.RED, BarStyle.SOLID);
+        bossBars.put(playerId, bossBar);
+        return bossBar;
+    }
+
+    private void warpPlayer(Player player, Location location, BossBar bossBar) {
+        long cooldownDuration = 10;
+
+        cooldowns.put(player.getUniqueId(), System.currentTimeMillis() + cooldownDuration);
+        bossBar.setProgress(1.0);
+        bossBar.addPlayer(player);
+
+        Scheduler.runAsyncSchedulerDelay(this, (onlinePlayer) -> {
+            cooldowns.remove(player.getUniqueId());
+            bossBars.remove(player.getUniqueId());
+            bossBar.removeAll();
+        }, (int) (cooldownDuration));
+
+        Scheduler.runAsyncSchedulerDelay(this, (onlinePlayer) -> {
+            player.teleportAsync(location.clone().add(0.5, 1, 0.5));
+            playWarpEffects(player);
+        }, (int) (cooldownDuration));
     }
 
     private void playWarpEffects(Player player) {
         player.playSound(player.getLocation(), Sound.ENTITY_ENDERMAN_TELEPORT, 1.0f, 1.0f);
-        // Add particle effects if desired
+        player.spawnParticle(Particle.PORTAL, player.getLocation(), 100);
     }
-
-    private void applyCooldown(Player player) {
-        long cooldownDuration = 30000;
-        cooldowns.put(player, System.currentTimeMillis() + cooldownDuration);
-        Scheduler.runAsyncSchedulerDelay(this, (onlinePlayer) -> {
-            cooldowns.remove(player);
-        }, (int) cooldownDuration / 1000);
-    }
-
 
     private void deductEchoShard(Player player) {
         ItemStack echoShard = new ItemStack(Material.ECHO_SHARD); // Replace with the actual item type

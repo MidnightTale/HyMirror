@@ -26,19 +26,19 @@ public class Scheduler {
         if (IS_FOLIA == null) IS_FOLIA = tryFolia();
         return IS_FOLIA;
     }
-    public static void runAsyncSchedulerDelay(Plugin plugin, Consumer<Player> playerTask, int initialDelayTicks) {
+    public static void runAsyncSchedulerDelay(Plugin plugin, Consumer<Player> playerTask, int initialDelaySeconds) {
         if (isFolia()) {
             Bukkit.getAsyncScheduler().runDelayed(plugin, task -> {
                 for (Player player : Bukkit.getOnlinePlayers()) {
                     playerTask.accept(player);
                 }
-            }, initialDelayTicks, TimeUnit.SECONDS);
+            }, initialDelaySeconds, TimeUnit.SECONDS);
         } else {
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
                 for (Player player : Bukkit.getOnlinePlayers()) {
                     playerTask.accept(player);
                 }
-            }, initialDelayTicks * 20L);
+            }, initialDelaySeconds * 20L);
         }
     }
     public static void runTaskForEntity(Entity entity, Plugin plugin, Runnable entityTask, long initialDelayTicks) {
